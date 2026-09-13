@@ -18,6 +18,8 @@ struct MenuBarView: View {
         Divider()
         modelSection
         Divider()
+        languageFilterSection
+        Divider()
         actionsSection
         Divider()
         Button("Quit sheeptun") {
@@ -63,12 +65,6 @@ struct MenuBarView: View {
         Menu("Permissions") {
             permissionItem("Microphone", status: permissions.microphoneStatus) {
                 Task { await permissions.requestMicrophone() }
-            } openSettings: {
-                permissions.openMicrophoneSettings()
-            }
-
-            permissionItem("Speech Recognition", status: permissions.speechRecognitionStatus) {
-                Task { await permissions.requestSpeechRecognition() }
             } openSettings: {
                 permissions.openMicrophoneSettings()
             }
@@ -120,10 +116,41 @@ struct MenuBarView: View {
 
     @ViewBuilder
     private var modelSection: some View {
-        if session.modelReady {
+        switch session.modelDownloadState {
+        case .downloading:
+            Label("Model: Downloading…", systemImage: "arrow.trianglehead.2.clockwise")
+            Text("First launch: ~400 MB from HuggingFace")
+                .font(.caption)
+                .foregroundStyle(.secondary)
+        case .ready:
             Label("Model: Ready", systemImage: "checkmark.circle")
-        } else {
-            Label("Model: Preparing…", systemImage: "arrow.trianglehead.2.clockwise")
+        case .failed(let message):
+            Label("Model: Download failed", systemImage: "exclamationmark.triangle")
+            Text(message)
+                .font(.caption)
+                .foregroundStyle(.secondary)
+                .lineLimit(3)
+            Button("Retry Download") {
+                Task { await session.retryModelDownload() }
+            }
+        }
+    }
+
+    @ViewBuilder
+    private var languageFilterSection: some View {
+        let currentName = settings.languageFilterCode
+            .flatMap { code in AppSettings.availableLanguageFilters.first { $0.code == code }?.name }
+            ?? "None"
+        Menu("Language filter: \(currentName)") {
+            Button("None (disabled)") {
+                settings.languageFilterCode = nil
+            }
+            Divider()
+            ForEach(AppSettings.availableLanguageFilters, id: \.code) { lang in
+                Button(lang.name) {
+                    settings.languageFilterCode = lang.code
+                }
+            }
         }
     }
 
@@ -170,9 +197,28 @@ struct MenuBarIconView: View {
     @ObservedObject var session: DictationSession
 
     var body: some View {
-        Image(systemName: session.state.systemImageName)
-            .symbolRenderingMode(.hierarchical)
-            .foregroundStyle(iconColor)
+        if session.state == .idle {
+            Image(nsImage: menuBarAppIcon)
+        } else {
+            Image(systemName: session.state.systemImageName)
+                .symbolRenderingMode(.hierarchical)
+                .foregroundStyle(iconColor)
+        }
+    }
+
+    private var menuBarAppIcon: NSImage {
+        let size = NSSize(width: 18, height: 18)
+        guard let original = NSImage(named: NSImage.applicationIconName) else {
+            return NSImage(size: size)
+        }
+        let resized = NSImage(size: size)
+        resized.lockFocus()
+        original.draw(in: NSRect(origin: .zero, size: size),
+                      from: .zero,
+                      operation: .copy,
+                      fraction: 1.0)
+        resized.unlockFocus()
+        return resized
     }
 
     private var iconColor: Color {

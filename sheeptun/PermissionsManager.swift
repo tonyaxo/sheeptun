@@ -21,6 +21,13 @@ final class PermissionsManager: ObservableObject {
         accessibilityStatus == .granted
     }
 
+    var summary: String {
+        var missing: [String] = []
+        if microphoneStatus != .granted { missing.append("Microphone") }
+        if accessibilityStatus != .granted { missing.append("Accessibility") }
+        return missing.isEmpty ? "" : "Missing: \(missing.joined(separator: ", "))"
+    }
+
     func checkAllPermissions() {
         checkMicrophone()
         checkAccessibility()

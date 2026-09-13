@@ -6,7 +6,5 @@
 	<true/>
 	<key>NSMicrophoneUsageDescription</key>
 	<string>sheeptun needs microphone access to capture speech for local transcription.</string>
-	<key>NSSpeechRecognitionUsageDescription</key>
-	<string>sheeptun uses on-device speech recognition to transcribe speech locally. No data leaves your Mac.</string>
 </dict>
 </plist>
