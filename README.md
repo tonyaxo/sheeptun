@@ -92,33 +92,6 @@ To plug in FluidAudio + Parakeet TDT v3:
 
 ---
 
-## Building
-
-```bash
-# Debug build
-xcodebuild -scheme sheeptun -configuration Debug build
-
-# Release archive
-xcodebuild -scheme sheeptun -configuration Release archive \
-  -archivePath build/sheeptun.xcarchive
-```
-
-Or use **Product → Archive** in Xcode.
-
----
-
-## Distributing (outside the App Store)
-
-1. **Product → Archive**
-2. In the Organizer: **Distribute App → Direct Distribution**
-3. Choose **Developer ID** signing (requires a paid Apple Developer account)
-4. Xcode notarizes the app automatically if you select "Upload to Apple's notarization service"
-5. Export the `.app`, wrap in a `.dmg` or `.zip`
-
-> **Note:** The app uses `CGEventTap` for the global hotkey, which requires the user to grant Accessibility permission in System Settings. This works correctly both sandboxed and unsandboxed. If you submit to the App Store, review Apple's guidelines on Accessibility entitlements first.
-
----
-
 ## Tests
 
 ```bash
@@ -148,3 +121,140 @@ xcodebuild test -scheme sheeptun -destination 'platform=macOS'
 - Transcriptions are only inserted into the active app.
 - Temporary audio files are deleted immediately after transcription.
 - No analytics, no logging, no crash reporting.
+
+
+## Release Process
+
+This app is distributed directly (outside the Mac App Store) **without** an Apple
+Developer Program membership. Builds are ad hoc–signed ("Sign to Run Locally"), not
+notarized. This document describes the full release cycle, from `Archive` to a
+published build.
+
+### Prerequisites (one-time setup)
+
+- Xcode → Settings → Accounts: your Apple ID is added
+- Target → Signing & Capabilities: Team is set to your free **Personal Team**
+- "Automatically manage signing" is enabled (Xcode will use **Sign to Run Locally**)
+
+### 1. Bump the version
+
+- Update the version / build number in the target's General settings (or `Info.plist`)
+- Add an entry to `CHANGELOG.md` describing what's new
+
+## 2. Archive the build
+
+- Set the run destination to **Any Mac (Apple Silicon, Intel)**
+- `Product → Archive`
+- Xcode Organizer opens automatically once the build finishes, with the new archive selected
+
+## 3. Extract the .app from the archive
+
+Skip `Distribute App → Direct Distribution` in Organizer — that flow requires a paid
+Developer ID Application certificate, which this project doesn't have.
+
+Instead, pull the built app straight out of the archive:
+
+1. In Organizer, right-click the archive → **Show in Finder**
+2. Right-click the `.xcarchive` file → **Show Package Contents**
+3. Navigate to `Products/Applications/`
+4. Copy `YourApp.app` to a working folder, e.g. `~/Desktop/release/`
+
+### 4. Re-sign ad hoc (recommended)
+
+Xcode's archive signature can carry references to the local build path. Re-signing
+cleanly avoids signature issues after the app is moved/zipped:
+
+```bash
+codesign --force --deep -s - "YourApp.app"
+```
+
+### 5. Verify the signature
+
+```bash
+codesign --verify --deep --strict --verbose=2 "YourApp.app"
+spctl -a -vvv "YourApp.app"
+```
+
+`spctl` will report the app as rejected/unnotarized — that's expected for this
+distribution method. What matters is that `codesign --verify` reports no errors.
+
+### 6. Package for distribution
+
+**Zip** (simplest):
+
+```bash
+ditto -c -k --sequesterRsrc --keepParent "YourApp.app" "YourApp-1.2.0.zip"
+```
+
+**DMG** (nicer UX, drag-to-Applications window):
+
+```bash
+brew install create-dmg
+
+create-dmg \
+  --volname "YourApp" \
+  --app-drop-link 450 120 \
+  "YourApp-1.2.0.dmg" \
+  "YourApp.app"
+```
+
+### 7. Publish the release
+
+- Upload the `.zip` / `.dmg` to GitHub Releases (or your website)
+- Tag the commit:
+
+```bash
+git tag v1.2.0
+git push origin v1.2.0
+```
+
+- Paste the `CHANGELOG.md` entry into the release notes
+- Include the Gatekeeper notice below in the release description / installation section
+
+Use **GitHub Releases** to store and share built binaries — assets don't count
+toward repo size and support files up to ~2 GB. Don't `git commit` the `.zip`/`.dmg`
+directly into the repo.
+
+Web UI: **Releases → Draft a new release**, attach the file, publish.
+
+Or
+
+```bash
+gh release create v1.2.0 \
+  YourApp-1.2.0.dmg \
+  --title "v1.2.0" \
+  --notes-file CHANGELOG.md
+```
+
+Since this repo is private, only collaborators with access can see and download it.
+
+
+### 8. Gatekeeper notice for users
+
+Because the app isn't notarized, macOS blocks it on first launch. Include something
+like this in your install instructions:
+
+> **macOS says the app "can't be opened" or is from an "unidentified developer"**
+>
+> This is expected — the app isn't notarized by Apple. To open it:
+>
+> 1. Try to open the app once (it will be blocked)
+> 2. Go to **System Settings → Privacy & Security**
+> 3. Scroll down — you'll see a message about the blocked app
+> 4. Click **Open Anyway**, then confirm
+>
+> Alternatively, in Terminal:
+>
+> ```bash
+> xattr -cr /Applications/YourApp.app
+> ```
+
+### Future: switching to notarized distribution
+
+If you later enroll in the Apple Developer Program ($99/year), only steps 3–5 change:
+
+- Signing & Capabilities → switch the certificate to **Developer ID Application**
+- Organizer → use `Distribute App → Developer ID` instead of manually extracting the app
+- Xcode / `notarytool` handles signing and notarization automatically
+- Step 8 (Gatekeeper notice) can be removed — notarized apps open with no warnings
+---
