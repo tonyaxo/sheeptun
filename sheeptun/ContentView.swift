@@ -1,24 +1,6 @@
-//
-//  ContentView.swift
-//  sheeptun
-//
-//  Created by Sergey Bogatyrev on 13/09/2026.
-//
-
+// Not used — app is a menu bar extra. Retained for Xcode project structure.
 import SwiftUI
 
 struct ContentView: View {
-    var body: some View {
-        VStack {
-            Image(systemName: "globe")
-                .imageScale(.large)
-                .foregroundStyle(.tint)
-            Text("Hello, world!")
-        }
-        .padding()
-    }
-}
-
-#Preview {
-    ContentView()
+    var body: some View { EmptyView() }
 }
