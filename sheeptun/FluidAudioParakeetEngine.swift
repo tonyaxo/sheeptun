@@ -27,7 +27,7 @@ final class FluidAudioParakeetEngine: SpeechRecognitionEngine, @unchecked Sendab
         }
     }
 
-    func transcribe(audioURL: URL, locale: Locale) async throws -> String {
+    func transcribe(audioURL: URL, locale: Locale, languageFilterCode: String?) async throws -> String {
         if asrManager == nil {
             try await prepare(locale: locale)
         }
@@ -35,14 +35,10 @@ final class FluidAudioParakeetEngine: SpeechRecognitionEngine, @unchecked Sendab
             throw SpeechRecognitionError.modelNotInstalled
         }
 
-        // Pick a language hint when the locale is known — v3 uses script-aware
-        // token filtering to reduce Cyrillic/Latin confusion on multilingual audio.
-        let language = languageHint(for: locale)
-
-        log.info("Running Parakeet TDT v3 transcription: \(audioURL.lastPathComponent), language: \(language?.rawValue ?? "auto")")
+        let language = languageFilterCode.flatMap { Language(rawValue: $0) }
+        log.info("Running Parakeet TDT v3 transcription: \(audioURL.lastPathComponent), filter: \(language?.rawValue ?? "none")")
         let result: ASRResult
         do {
-            // v3 always uses 2 decoder LSTM layers (v2/v3 Parakeet TDT default)
             var decoderState = TdtDecoderState.make(decoderLayers: 2)
             result = try await asrManager.transcribe(audioURL, decoderState: &decoderState, language: language)
         } catch {
@@ -56,20 +52,5 @@ final class FluidAudioParakeetEngine: SpeechRecognitionEngine, @unchecked Sendab
             throw SpeechRecognitionError.emptyResult
         }
         return text
-    }
-
-    private func languageHint(for locale: Locale) -> Language? {
-        switch locale.language.languageCode?.identifier {
-        case "ru": return .russian
-        case "uk": return .ukrainian
-        case "be": return .belarusian
-        case "bg": return .bulgarian
-        case "sr": return .serbian
-        case "en": return .english
-        case "de": return .german
-        case "fr": return .french
-        case "es": return .spanish
-        default: return nil
-        }
     }
 }
