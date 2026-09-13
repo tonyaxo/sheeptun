@@ -165,14 +165,14 @@ Xcode's archive signature can carry references to the local build path. Re-signi
 cleanly avoids signature issues after the app is moved/zipped:
 
 ```bash
-codesign --force --deep -s - "YourApp.app"
+codesign --force --deep -s - "SheepTun.app"
 ```
 
 ### 5. Verify the signature
 
 ```bash
-codesign --verify --deep --strict --verbose=2 "YourApp.app"
-spctl -a -vvv "YourApp.app"
+codesign --verify --deep --strict --verbose=2 "SheepTun.app"
+spctl -a -vvv "SheepTun.app"
 ```
 
 `spctl` will report the app as rejected/unnotarized — that's expected for this
@@ -183,7 +183,7 @@ distribution method. What matters is that `codesign --verify` reports no errors.
 **Zip** (simplest):
 
 ```bash
-ditto -c -k --sequesterRsrc --keepParent "YourApp.app" "YourApp-1.2.0.zip"
+ditto -c -k --sequesterRsrc --keepParent "SheepTun.app" "SheepTun-1.2.0.zip"
 ```
 
 **DMG** (nicer UX, drag-to-Applications window):
@@ -191,11 +191,11 @@ ditto -c -k --sequesterRsrc --keepParent "YourApp.app" "YourApp-1.2.0.zip"
 ```bash
 brew install create-dmg
 
-create-dmg \
-  --volname "YourApp" \
+create-dmg \     
+  --volname "SheepTun" \
   --app-drop-link 450 120 \
-  "YourApp-1.2.0.dmg" \
-  "YourApp.app"
+  "SheepTun-0.1.0.dmg" \
+  "SheepTun.app"
 ```
 
 ### 7. Publish the release
