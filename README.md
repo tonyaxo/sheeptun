@@ -92,13 +92,102 @@ To plug in FluidAudio + Parakeet TDT v3:
 
 ---
 
+## Building
+
+`build.sh` covers the whole cycle — compile, test, archive, sign, verify and package.
+It needs nothing but Xcode's command line tools; `create-dmg` is required only for `--dmg`.
+
+```bash
+./build.sh test                                        # run the unit tests
+./build.sh build                                       # compile (Debug)
+./build.sh build release                               # compile (Release)
+./build.sh release                                     # test -> archive -> sign -> verify -> package
+./build.sh release --no-test                           # same, without the test run
+./build.sh release --dmg                               # also produce a .dmg
+./build.sh release --identity "SheepTun Local Signing" # sign with a certificate instead of ad hoc
+./build.sh clean                                       # remove build/
+./build.sh --help
+```
+
+### What `release` does
+
+1. Runs the unit tests (skip with `--no-test`)
+2. `xcodebuild archive` into `build/SheepTun.xcarchive` — no Organizer involved
+3. Copies the app out of the archive to `build/dist/SheepTun.app`
+4. Extracts the entitlements from the archived bundle and re-signs with them, nested code first
+5. Verifies the signature and asserts `app-sandbox`, `device.audio-input` and
+   `network.client` are still present — the build fails if any entitlement was lost
+6. Packages `SheepTun-<version>.zip`, and a `.dmg` with `--dmg`, taking the version from
+   `MARKETING_VERSION`
+7. Prints the `gh release create` command for publishing
+
+### Output
+
+```
+build/
+├── logs/                  # full xcodebuild output, surfaced only on failure
+├── SheepTun.xcarchive
+├── SheepTun.entitlements  # extracted from the archive, used for re-signing
+└── dist/
+    ├── SheepTun.app
+    ├── SheepTun-1.0.zip
+    └── SheepTun-1.0.dmg
+```
+
+`build/` is gitignored. A release run looks like this:
+
+```
+==> Releasing SheepTun 1.0
+==> Archiving (Release)
+    SheepTun.xcarchive
+==> Extracting the app from the archive
+    sheeptun.app → SheepTun.app
+==> Re-signing (identity: -)
+    entitlements saved to SheepTun.entitlements
+    signed SheepTun.app
+==> Verifying signature and entitlements
+    SheepTun.app: valid on disk
+    SheepTun.app: satisfies its Designated Requirement
+    com.apple.security.app-sandbox ✓
+    com.apple.security.device.audio-input ✓
+    com.apple.security.network.client ✓
+    spctl: SheepTun.app: rejected
+==> Packaging
+    SheepTun-1.0.zip (19M)
+==> Done
+```
+
+`spctl: rejected` is expected — the app is not notarized. See
+[Gatekeeper notice for users](#8-gatekeeper-notice-for-users).
+
+### Signing identity
+
+The default identity is ad hoc (`-`). An ad-hoc signature changes on every build, so macOS
+treats each build as a brand-new app and previously granted Microphone and Accessibility
+permissions stop applying. Pass `--identity` with a self-signed certificate you reuse to
+keep those grants stable across builds — see
+[Permissions and ad-hoc signatures](#5a-permissions-and-ad-hoc-signatures).
+
+### Without the script
+
+```bash
+xcodebuild -scheme sheeptun -destination 'platform=macOS' -configuration Release build
+xcodebuild test -scheme sheeptun -destination 'platform=macOS' -only-testing:sheeptunTests
+```
+
+`swift build` cannot build this app: SwiftPM has no `.app` bundle product type, does not
+compile the asset catalog, and does not sign or apply entitlements. FluidAudio is consumed
+as a SwiftPM dependency inside the Xcode project.
+
+---
+
 ## Tests
 
 ```bash
-xcodebuild test -scheme sheeptun -destination 'platform=macOS'
+./build.sh test
 ```
 
-23 tests, 0 failures:
+24 tests, 0 failures:
 - Unit: state machines, settings, error handling, permissions
 - Functional: full dictation pipeline with mocked audio/STT/insertion
 
@@ -130,6 +219,9 @@ Developer Program membership. Builds are ad hoc–signed ("Sign to Run Locally")
 notarized. This document describes the full release cycle, from `Archive` to a
 published build.
 
+Steps 2–7 are what `./build.sh release` automates (see [Building](#building)); they are
+documented here as the manual path, and to explain what the script does.
+
 ### Prerequisites (one-time setup)
 
 - Xcode → Settings → Accounts: your Apple ID is added
@@ -159,24 +251,69 @@ Instead, pull the built app straight out of the archive:
 3. Navigate to `Products/Applications/`
 4. Copy `YourApp.app` to a working folder, e.g. `~/Desktop/release/`
 
-### 4. Re-sign ad hoc (recommended)
+### 4. Re-sign — and keep the entitlements
 
-Xcode's archive signature can carry references to the local build path. Re-signing
-cleanly avoids signature issues after the app is moved/zipped:
+**Never run `codesign --force --deep -s - "SheepTun.app"` on its own.** Signing without
+`--entitlements` **strips every entitlement** from the bundle: App Sandbox, microphone
+access and network access all silently disappear, and the app you ship stops matching the
+app you built and tested.
+
+Extract the entitlements first, then re-sign with them (inside-out: nested code before the
+bundle, since `--deep` is not a reliable way to sign an app for distribution):
 
 ```bash
-codesign --force --deep -s - "SheepTun.app"
+# 1. Save the entitlements Xcode generated
+codesign -d --entitlements SheepTun.entitlements --xml "SheepTun.app"
+
+# 2. Sign nested code first
+find "SheepTun.app/Contents/Frameworks" -depth 1 -print0 2>/dev/null |
+  xargs -0 -I {} codesign --force --options runtime -s - "{}"
+
+# 3. Sign the app itself, with entitlements and Hardened Runtime
+codesign --force --options runtime \
+  --entitlements SheepTun.entitlements \
+  -s - "SheepTun.app"
 ```
 
-### 5. Verify the signature
+If re-signing isn't necessary, the safest option is to ship the archive's app untouched.
+
+### 5. Verify the signature *and* the entitlements
 
 ```bash
-codesign --verify --deep --strict --verbose=2 "SheepTun.app"
+codesign --verify --strict --verbose=2 "SheepTun.app"
+codesign -d --entitlements - "SheepTun.app"
 spctl -a -vvv "SheepTun.app"
 ```
 
+The entitlements dump must still list `com.apple.security.app-sandbox`,
+`com.apple.security.device.audio-input` and `com.apple.security.network.client`. If it
+prints nothing, step 4 wiped them — do not ship that build.
+
 `spctl` will report the app as rejected/unnotarized — that's expected for this
 distribution method. What matters is that `codesign --verify` reports no errors.
+
+### 5a. Permissions and ad-hoc signatures
+
+macOS keys granted permissions (Microphone, Accessibility) to the app's code signature.
+An ad-hoc signature changes on **every** rebuild, so every repackaged build looks like a
+brand-new app to the system: earlier grants no longer apply, and a stale entry can sit in
+System Settings pointing at the old signature.
+
+To keep grants stable across builds, sign with a **self-signed certificate** you reuse
+(Keychain Access → Certificate Assistant → Create a Certificate, type "Code Signing"),
+and pass its name instead of `-`:
+
+```bash
+codesign --force --options runtime --entitlements SheepTun.entitlements \
+  -s "SheepTun Local Signing" "SheepTun.app"
+```
+
+If permissions still look stuck after installing a new build, reset them once:
+
+```bash
+tccutil reset Microphone local.project.sheeptun
+tccutil reset Accessibility local.project.sheeptun
+```
 
 ### 6. Package for distribution
 
