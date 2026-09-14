@@ -12,8 +12,6 @@ struct MenuBarView: View {
         Divider()
         hotkeySection
         Divider()
-        microphoneSection
-        Divider()
         permissionsSection
         Divider()
         modelSection
@@ -29,34 +27,18 @@ struct MenuBarView: View {
 
     @ViewBuilder
     private var statusSection: some View {
+        // Just the state. No transcription preview and no error text: failures are reported
+        // by notification, the menu is not a log.
         Label(session.state.displayName, systemImage: session.state.systemImageName)
-        if !session.lastTranscription.isEmpty, session.state == .idle {
-            let preview = String(session.lastTranscription.prefix(60))
-            let suffix = session.lastTranscription.count > 60 ? "…" : ""
-            Text(preview + suffix)
-                .foregroundStyle(.secondary)
-                .font(.caption)
-        }
     }
 
     @ViewBuilder
     private var hotkeySection: some View {
         Label("Hotkey: \(settings.hotkey.displayString)", systemImage: "keyboard")
-    }
-
-    @ViewBuilder
-    private var microphoneSection: some View {
-        Menu("Microphone") {
-            Button("System Default") {
-                settings.selectedMicrophoneUID = nil
-            }
-            let devices = AudioRecorder().availableInputDevices()
-            if !devices.isEmpty { Divider() }
-            ForEach(devices) { device in
-                Button(device.name) {
-                    settings.selectedMicrophoneUID = device.id
-                }
-            }
+        if appDelegate.hotkeyStatus != .active {
+            Text("Hotkey listener: \(appDelegate.hotkeyStatus.displayLabel)")
+                .font(.caption)
+                .foregroundStyle(.secondary)
         }
     }
 
@@ -64,8 +46,6 @@ struct MenuBarView: View {
     private var permissionsSection: some View {
         Menu("Permissions") {
             permissionItem("Microphone", status: permissions.microphoneStatus) {
-                Task { await permissions.requestMicrophone() }
-            } openSettings: {
                 permissions.openMicrophoneSettings()
             }
 
@@ -83,15 +63,19 @@ struct MenuBarView: View {
         let status = permissions.accessibilityStatus
         Menu("Accessibility: \(status.displayLabel)") {
             if status != .granted {
-                Button("Show System Prompt…") {
-                    permissions.requestAccessibility()
-                }
+                // No "show the prompt" item: the app raises the system prompt itself at launch.
                 Button("Open System Settings…") {
                     permissions.openAccessibilitySettings()
                 }
                 Divider()
-                Text("Grant access, then click Re-register Hotkey.")
+                Text("The hotkey activates by itself once access is granted.")
                     .foregroundStyle(.secondary)
+            } else if appDelegate.hotkeyStatus == .refused {
+                Text("Granted, but the system refused the event tap.")
+                    .foregroundStyle(.secondary)
+                Button("Try Again") {
+                    appDelegate.setupHotkey()
+                }
             } else {
                 Text("Granted ✓")
             }
@@ -102,13 +86,12 @@ struct MenuBarView: View {
     private func permissionItem(
         _ name: String,
         status: PermissionStatus,
-        request: (() -> Void)?,
         openSettings: @escaping () -> Void
     ) -> some View {
         Menu("\(name): \(status.displayLabel)") {
-            if status == .unknown, let request {
-                Button("Request Permission") { request() }
-            } else if status == .denied || status == .restricted {
+            // No "request" item: the permission is requested at launch. Once the user has
+            // answered, System Settings is the only way back.
+            if status != .granted {
                 Button("Open System Settings…") { openSettings() }
             }
         }

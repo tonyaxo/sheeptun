@@ -20,10 +20,6 @@ final class AppSettings: ObservableObject {
         didSet { saveHotkey() }
     }
 
-    @Published var selectedMicrophoneUID: String? {
-        didSet { defaults.set(selectedMicrophoneUID, forKey: Keys.microphoneUID) }
-    }
-
     @Published var autoInsertText: Bool {
         didSet { defaults.set(autoInsertText, forKey: Keys.autoInsert) }
     }
@@ -70,7 +66,6 @@ final class AppSettings: ObservableObject {
 
     private enum Keys {
         static let hotkey = "hotkey"
-        static let microphoneUID = "selectedMicrophoneUID"
         static let autoInsert = "autoInsertText"
         static let locale = "locale"
         static let languageFilter = "languageFilterCode"
@@ -84,7 +79,6 @@ final class AppSettings: ObservableObject {
         } else {
             hotkey = .defaultConfig
         }
-        selectedMicrophoneUID = defaults.string(forKey: Keys.microphoneUID)
         autoInsertText = defaults.object(forKey: Keys.autoInsert) as? Bool ?? true
         let localeId = defaults.string(forKey: Keys.locale) ?? "ru-RU"
         locale = Locale(identifier: localeId)

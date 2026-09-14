@@ -32,12 +32,14 @@ final class MockSpeechEngine: SpeechRecognitionEngine, @unchecked Sendable {
 final class MockAudioRecorder: AudioRecording, @unchecked Sendable {
     var shouldFail = false
     var stopShouldFail = false
+    /// Emulates a recording that produced no usable audio — the regression this suite guards.
+    var stopError: Error?
     private(set) var isRecording = false
     var startCallCount = 0
     var stopCallCount = 0
     var stubbedURL: URL = FileManager.default.temporaryDirectory.appendingPathComponent("mock.caf")
 
-    func startRecording(preferredDeviceUID: String?) async throws -> URL {
+    func startRecording() async throws -> URL {
         startCallCount += 1
         if shouldFail { throw AudioRecorderError.engineStartFailed("mock") }
         isRecording = true
@@ -46,12 +48,11 @@ final class MockAudioRecorder: AudioRecording, @unchecked Sendable {
 
     func stopRecording() async throws -> URL {
         stopCallCount += 1
-        if stopShouldFail { throw AudioRecorderError.notRecording }
         isRecording = false
+        if let stopError { throw stopError }
+        if stopShouldFail { throw AudioRecorderError.notRecording }
         return stubbedURL
     }
-
-    func availableInputDevices() -> [AudioInputDevice] { [] }
 }
 
 final class MockTextInserter: TextInserting, @unchecked Sendable {
@@ -250,6 +251,70 @@ struct DictationPipelineTests {
         try await Task.sleep(for: .milliseconds(200))
 
         #expect(inserter.insertCallCount == 0)
+        #expect(session.state == .idle)
+    }
+
+    @Test("recording that captured no audio surfaces a failure")
+    @MainActor func noAudioCaptured() async throws {
+        let recorder = MockAudioRecorder()
+        recorder.stopError = AudioRecorderError.noAudioCaptured
+        let inserter = MockTextInserter()
+
+        let session = makeSession(recorder: recorder, inserter: inserter)
+        await session.startDictation()
+        await session.stopDictation()
+        try await Task.sleep(for: .milliseconds(200))
+
+        if case .error = session.state { } else {
+            Issue.record("Expected .error state when no audio was captured")
+        }
+        #expect(session.lastFailure?.isEmpty == false)
+        #expect(inserter.insertCallCount == 0)
+    }
+
+    @Test("transcription failure is recorded in lastFailure")
+    @MainActor func transcriptionFailureRecorded() async throws {
+        let engine = MockSpeechEngine()
+        engine.shouldFail = true
+
+        let session = makeSession(engine: engine)
+        await session.startDictation()
+        await session.stopDictation()
+        try await Task.sleep(for: .milliseconds(200))
+
+        #expect(session.lastFailure?.isEmpty == false)
+    }
+
+    @Test("empty transcription is recorded without an error state")
+    @MainActor func emptyTranscriptionRecorded() async throws {
+        let engine = MockSpeechEngine()
+        engine.failWithEmpty = true
+
+        let session = makeSession(engine: engine)
+        await session.startDictation()
+        await session.stopDictation()
+        try await Task.sleep(for: .milliseconds(200))
+
+        #expect(session.state == .idle)
+        #expect(session.lastFailure == "No speech detected")
+    }
+
+    @Test("a successful dictation clears the previous failure")
+    @MainActor func successClearsFailure() async throws {
+        let engine = MockSpeechEngine()
+        engine.failWithEmpty = true
+        let session = makeSession(engine: engine)
+        await session.startDictation()
+        await session.stopDictation()
+        try await Task.sleep(for: .milliseconds(200))
+        #expect(session.lastFailure != nil)
+
+        engine.failWithEmpty = false
+        await session.startDictation()
+        await session.stopDictation()
+        try await Task.sleep(for: .milliseconds(200))
+
+        #expect(session.lastFailure == nil)
         #expect(session.state == .idle)
     }
 
