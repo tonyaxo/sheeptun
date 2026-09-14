@@ -4,6 +4,18 @@ A native macOS menu bar dictation app. Hold a hotkey, speak in Russian, release 
 
 All processing is local. No cloud, no accounts, no telemetry.
 
+## Known issues
+
+- **A newly installed build can lose its permissions.** macOS ties granted permissions to an
+  app's code signature, and an ad hoc signature changes with every build — so a fresh build
+  asks for the microphone again and may have to be re-added under Accessibility. Signing with
+  a certificate you reuse avoids this; see
+  [Permissions and ad-hoc signatures](#5a-permissions-and-ad-hoc-signatures).
+
+- **There is no microphone picker.** Dictation always records from the system default input,
+  which you choose in System Settings → Sound. If the default device produces no audio,
+  dictation reports "No audio was captured" instead of transcribing.
+
 ---
 
 ## Requirements
@@ -16,13 +28,16 @@ All processing is local. No cloud, no accounts, no telemetry.
 
 ## First launch
 
-1. Build and run from Xcode (or install the exported app).
-2. The app appears only in the menu bar — no Dock icon.
-3. Open the menu and check **Permissions** — grant:
-   - **Microphone** — click "Request Permission" in the menu
-   - **Speech Recognition** — click "Request Permission" in the menu
-   - **Accessibility** — click "Open System Settings" and enable sheeptun in Privacy & Security → Accessibility (required for the global hotkey and text insertion)
-4. The model downloads automatically the first time you transcribe (~300 MB for Russian).
+1. Build and run from Xcode, or install the exported app — see [Building](#building).
+2. The app lives in the menu bar only — no Dock icon.
+3. Grant the two permissions it asks for on first launch:
+   - **Microphone** — the system prompt appears by itself; click Allow.
+   - **Accessibility** — the app shows the system prompt; open System Settings from it and
+     enable sheeptun under Privacy & Security → Accessibility. This is what the global hotkey
+     and text insertion need. The hotkey starts working within about a second of the grant —
+     no menu action required.
+4. The speech model (~400 MB) downloads on first launch. The menu shows the progress and a
+   notification arrives once it is ready; dictation works after that.
 
 ---
 
@@ -187,9 +202,10 @@ as a SwiftPM dependency inside the Xcode project.
 ./build.sh test
 ```
 
-24 tests, 0 failures:
+28 tests, 0 failures:
 - Unit: state machines, settings, error handling, permissions
-- Functional: full dictation pipeline with mocked audio/STT/insertion
+- Functional: full dictation pipeline with mocked audio/STT/insertion, including the
+  failure paths (no audio captured, transcription failure, no speech detected)
 
 ---
 
@@ -198,9 +214,9 @@ as a SwiftPM dependency inside the Xcode project.
 | Setting | Default |
 |---|---|
 | Hotkey | Right Option (⌥) |
-| Microphone | System default |
 | Auto-insert text | On |
 | Language | Russian (ru-RU) |
+| Language filter | None (the model picks the script per token) |
 
 ---
 
