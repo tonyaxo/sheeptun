@@ -16,6 +16,7 @@ struct sheeptunApp: App {
                 .environmentObject(appDelegate.dictationSession)
                 .environmentObject(appDelegate.settings)
                 .environmentObject(appDelegate.permissionsManager)
+                .environmentObject(appDelegate.loginItem)
                 .environmentObject(appDelegate)
         } label: {
             MenuBarIconView(session: appDelegate.dictationSession)
@@ -32,6 +33,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, UNUserNotificationCent
     /// One shared recorder for the whole app. Never build one in a SwiftUI body — its deinit
     /// has to hop to the MainActor and doing that mid-render crashes the view update.
     let audioRecorder: AudioRecorder
+    let loginItem = LoginItemManager()
 
     @Published private(set) var hotkeyStatus: HotkeyTapStatus = .inactive
 

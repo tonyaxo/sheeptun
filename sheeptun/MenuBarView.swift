@@ -5,6 +5,7 @@ struct MenuBarView: View {
     @EnvironmentObject var session: DictationSession
     @EnvironmentObject var settings: AppSettings
     @EnvironmentObject var permissions: PermissionsManager
+    @EnvironmentObject var loginItem: LoginItemManager
     @EnvironmentObject var appDelegate: AppDelegate
 
     var body: some View {
@@ -17,6 +18,8 @@ struct MenuBarView: View {
         modelSection
         Divider()
         languageFilterSection
+        Divider()
+        loginItemSection
         Divider()
         actionsSection
         Divider()
@@ -54,6 +57,7 @@ struct MenuBarView: View {
             Divider()
             Button("Refresh Status") {
                 permissions.checkAllPermissions()
+                loginItem.refresh()
             }
         }
     }
@@ -99,22 +103,22 @@ struct MenuBarView: View {
 
     @ViewBuilder
     private var modelSection: some View {
-        switch session.modelDownloadState {
-        case .downloading:
-            Label("Model: Downloading…", systemImage: "arrow.trianglehead.2.clockwise")
-            Text("First launch: ~400 MB from HuggingFace")
+        switch session.modelState {
+        case .preparing:
+            Label("Model: Preparing…", systemImage: "arrow.trianglehead.2.clockwise")
+            Text("First run downloads ~400 MB; later launches only load it")
                 .font(.caption)
                 .foregroundStyle(.secondary)
         case .ready:
             Label("Model: Ready", systemImage: "checkmark.circle")
         case .failed(let message):
-            Label("Model: Download failed", systemImage: "exclamationmark.triangle")
+            Label("Model: Failed", systemImage: "exclamationmark.triangle")
             Text(message)
                 .font(.caption)
                 .foregroundStyle(.secondary)
                 .lineLimit(3)
-            Button("Retry Download") {
-                Task { await session.retryModelDownload() }
+            Button("Retry") {
+                Task { await session.retryModelPreparation() }
             }
         }
     }
@@ -134,6 +138,25 @@ struct MenuBarView: View {
                     settings.languageFilterCode = lang.code
                 }
             }
+        }
+    }
+
+    @ViewBuilder
+    private var loginItemSection: some View {
+        Button(loginItem.isEnabled ? "Launch at Login ✓" : "Launch at Login") {
+            loginItem.setEnabled(!loginItem.isEnabled)
+        }
+        if loginItem.needsApproval {
+            Text("Approve sheeptun under Login Items & Extensions to enable it")
+                .font(.caption)
+                .foregroundStyle(.secondary)
+            Button("Open Login Items…") {
+                loginItem.openLoginItemsSettings()
+            }
+        } else if loginItem.isUnavailable {
+            Text("Launch at login is unavailable for this build")
+                .font(.caption)
+                .foregroundStyle(.secondary)
         }
     }
 

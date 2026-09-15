@@ -5,22 +5,25 @@ import UserNotifications
 
 private let log = Logger(subsystem: "sheeptun", category: "DictationSession")
 
-enum ModelDownloadState: Equatable {
-    case downloading
+/// FluidAudio exposes no way to tell a first download from loading models already on disk
+/// ("cached locally after first download" is all its documentation promises), so this state
+/// says "preparing" rather than claiming a download that may not be happening.
+enum ModelState: Equatable {
+    case preparing
     case ready
     case failed(String)
 
     var displayName: String {
         switch self {
-        case .downloading: return "Downloading model…"
+        case .preparing: return "Preparing model…"
         case .ready: return "Model: Ready"
-        case .failed: return "Download failed"
+        case .failed: return "Model failed"
         }
     }
 
     var systemImage: String {
         switch self {
-        case .downloading: return "arrow.trianglehead.2.clockwise"
+        case .preparing: return "arrow.trianglehead.2.clockwise"
         case .ready: return "checkmark.circle"
         case .failed: return "exclamationmark.triangle"
         }
@@ -31,12 +34,12 @@ enum ModelDownloadState: Equatable {
 final class DictationSession: ObservableObject {
     @Published private(set) var state: DictationState = .idle
     @Published private(set) var lastTranscription: String = ""
-    @Published private(set) var modelDownloadState: ModelDownloadState = .downloading
+    @Published private(set) var modelState: ModelState = .preparing
     /// Survives the return to `.idle` so the menu still explains the last failure after the
     /// error state has cleared itself.
     @Published private(set) var lastFailure: String?
 
-    var modelReady: Bool { modelDownloadState == .ready }
+    var modelReady: Bool { modelState == .ready }
 
     private let audioRecorder: AudioRecording
     private let speechEngine: SpeechRecognitionEngine
@@ -45,6 +48,10 @@ final class DictationSession: ObservableObject {
 
     private var recordingURL: URL?
     private var activeTask: Task<Void, Never>?
+
+    /// How long preparation may take before the user is told what the app is waiting for.
+    private static let slowPreparationNotice = 8
+    private var explainedSlowPreparation = false
 
     init(
         audioRecorder: AudioRecording,
@@ -58,11 +65,11 @@ final class DictationSession: ObservableObject {
         self.textInserter = textInserter
         self.settings = settings
         if skipWarmup {
-            modelDownloadState = .ready
+            modelState = .ready
         }
     }
 
-    /// Kicks off the model download. Called after notification authorization is in place,
+    /// Kicks off model preparation. Called after notification authorization is in place,
     /// otherwise the first banners are dropped before the user has been asked.
     func start() async {
         guard !modelReady else { return }
@@ -70,29 +77,46 @@ final class DictationSession: ObservableObject {
     }
 
     private func warmUpEngine() async {
-        modelDownloadState = .downloading
-        log.info("Downloading/loading Parakeet TDT v3 for locale \(self.settings.locale.identifier)…")
-        sendNotification(
-            id: "model-downloading",
-            title: "sheeptun: Downloading model",
-            body: "Parakeet TDT v3 (~400 MB) is being downloaded. This happens once."
-        )
+        modelState = .preparing
+        log.info("Preparing Parakeet TDT v3 for locale \(self.settings.locale.identifier)…")
+
+        // Loading models already on disk takes seconds; a first download takes minutes. Rather
+        // than announce a download on every launch, stay quiet and explain only once the wait
+        // is long enough that the user needs to know why dictation is not working yet.
+        explainedSlowPreparation = false
+        let slowNotice = Task { @MainActor [weak self] in
+            try? await Task.sleep(for: .seconds(Self.slowPreparationNotice))
+            guard let self, case .preparing = self.modelState else { return }
+            self.sendNotification(
+                id: "model-preparing",
+                title: "sheeptun: Preparing the speech model",
+                body: "The first run downloads about 400 MB; later launches only load it from disk. Dictation works as soon as this finishes."
+            )
+            self.explainedSlowPreparation = true
+        }
+
+        let started = Date()
         do {
             try await speechEngine.prepare(locale: settings.locale)
-            modelDownloadState = .ready
-            log.info("Speech engine ready")
-            sendNotification(
-                id: "model-ready",
-                title: "sheeptun: Model ready",
-                body: "Hold Right Option to start dictating."
-            )
+            slowNotice.cancel()
+            modelState = .ready
+            log.info("Speech engine ready in \(Date().timeIntervalSince(started), format: .fixed(precision: 1))s")
+            // Only worth a banner if the user was told to wait in the first place.
+            if explainedSlowPreparation {
+                sendNotification(
+                    id: "model-ready",
+                    title: "sheeptun: Model ready",
+                    body: "Hold Right Option to start dictating."
+                )
+            }
         } catch {
-            modelDownloadState = .failed(error.localizedDescription)
-            log.error("Speech engine warm-up failed: \(error)")
+            slowNotice.cancel()
+            modelState = .failed(error.localizedDescription)
+            log.error("Model preparation failed: \(error)")
             sendNotification(
                 id: "model-failed",
-                title: "sheeptun: Download failed",
-                body: "Open the menu bar icon to retry."
+                title: "sheeptun: Model unavailable",
+                body: "Open the menu bar icon and choose Retry."
             )
         }
     }
@@ -107,8 +131,8 @@ final class DictationSession: ObservableObject {
         }
     }
 
-    func retryModelDownload() async {
-        guard case .failed = modelDownloadState else { return }
+    func retryModelPreparation() async {
+        guard case .failed = modelState else { return }
         await warmUpEngine()
     }
 
@@ -119,18 +143,18 @@ final class DictationSession: ObservableObject {
         }
         guard modelReady else {
             log.warning("startDictation called before model is ready")
-            switch modelDownloadState {
-            case .downloading:
+            switch modelState {
+            case .preparing:
                 sendNotification(
                     id: "model-not-ready",
-                    title: "sheeptun: Model still downloading",
-                    body: "Dictation starts working as soon as the download finishes."
+                    title: "sheeptun: Model still preparing",
+                    body: "Dictation starts working as soon as the model has finished loading."
                 )
             case .failed:
                 sendNotification(
                     id: "model-not-ready",
-                    title: "sheeptun: Model missing",
-                    body: "Open the menu bar icon and choose Retry Download."
+                    title: "sheeptun: Model unavailable",
+                    body: "Open the menu bar icon and choose Retry."
                 )
             case .ready:
                 break
