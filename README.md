@@ -88,6 +88,44 @@ AppSettings          — UserDefaults-backed: hotkey, mic, locale, auto-insert
 MenuBarView          — SwiftUI menu UI
 ```
 
+### Launch at login, and what a launch agent would take
+
+The app can register itself as a login item through `SMAppService.mainApp`, and only when the user
+switches **Launch at Login** on in the menu — it never registers itself on its own initiative. The
+state is always read back from `SMAppService` rather than cached, because login items can be changed
+in System Settings at any time.
+
+A login item starts the app at login and does nothing else. The system may also terminate a menu bar
+app mid-session: when the startup disk runs low, `cache_delete` asks RunningBoard to kill it to purge
+the app's container caches. That leaves no crash report — only a `launchd` record:
+
+```
+exited with exit reason (namespace: 15 code: 0xbaddd15c) - OS_REASON_RUNNINGBOARD
+explanation: CacheDeleteAppContainerCaches requesting termination assertion
+```
+
+Nothing brings the app back until the next login. If that ever needs fixing, the mechanism is a
+launch agent, and it has to be built like this:
+
+1. **A helper target, not this app.** An agent whose program is the app's own executable starts a
+   *second copy* of the app instead of adopting the running one — an agent is meant to be a separate
+   faceless process. So the supported shape is a small UI-less helper target with its own binary
+   inside the bundle, whose only job is to relaunch the app.
+2. **A plist inside the bundle** at `Contents/Library/LaunchAgents/<label>.plist`, put there by a
+   Copy Files build phase (destination *Wrapper*, subpath `Contents/Library/LaunchAgents`). The
+   `Label` must match the file name, and `BundleProgram` points at the helper, relative to the bundle.
+3. **Registration** with `SMAppService.agent(plistName:)`. It appears in System Settings under
+   *Allow in the Background*, separately from *Open at Login* — so register either the agent or the
+   login item, never both, or the app starts twice and the user gets two switches for one thing.
+4. **Keys that matter:** `RunAtLoad` to start it at login; `KeepAlive` as
+   `{ SuccessfulExit = false }` so Quit in the menu stays quit while a system kill is undone;
+   `ThrottleInterval` so a relaunch loop cannot fight whatever killed the app; `ProcessType` of
+   `Interactive`; `LimitLoadToSessionType` of `Aqua`; and `AssociatedBundleIdentifiers` so System
+   Settings names the app instead of a bare label.
+
+Until auto-restart is genuinely needed, the login item is the whole story — and free disk space is
+what actually keeps the app alive.
+
 ### Replacing the STT engine (FluidAudio / Parakeet TDT v3)
 
 The `SpeechRecognitionEngine` protocol is the only integration point:
@@ -122,6 +160,12 @@ It needs nothing but Xcode's command line tools; `create-dmg` is required only f
 ./build.sh release --identity "SheepTun Local Signing" # sign with a certificate instead of ad hoc
 ./build.sh clean                                       # remove build/
 ./build.sh --help
+```
+
+### Find identity to sign
+
+```bash
+security find-identity -v -p codesigning
 ```
 
 ### What `release` does
