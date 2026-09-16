@@ -163,11 +163,8 @@ struct MenuBarView: View {
     @ViewBuilder
     private var actionsSection: some View {
         if session.state == .idle {
-            Button("Start Dictation") {
-                Task { await session.startDictation() }
-            }
-            .disabled(!permissions.allGranted)
-
+            // No "Start Dictation": dictation is push-to-talk, and the menu closes on click,
+            // so a recording started here could only be stopped by reopening the menu.
             if permissions.accessibilityStatus == .granted {
                 Button("Re-register Hotkey") {
                     appDelegate.setupHotkey()
