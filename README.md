@@ -14,7 +14,9 @@ All processing is local. No cloud, no accounts, no telemetry.
 
 - **There is no microphone picker.** Dictation always records from the system default input,
   which you choose in System Settings → Sound. If the default device produces no audio,
-  dictation reports "No audio was captured" instead of transcribing.
+  dictation reports "No audio was captured" instead of transcribing. Changing the default
+  input while the app is running is fine — see
+  [Following the input device](#following-the-input-device).
 
 ---
 
@@ -76,7 +78,7 @@ sheeptunApp          — App entry point, MenuBarExtra scene
 AppDelegate          — Wires all services together at launch
 
 DictationSession     — Pipeline orchestrator (@MainActor)
-  ├── AudioRecorder          — AVAudioEngine → temp CAF file
+  ├── AudioRecorder          — a fresh AVAudioEngine per dictation → temp CAF file
   ├── SpeechRecognitionEngine (protocol)
   │     └── AppleSpeechEngine  — SpeechAnalyzer + SpeechTranscriber (on-device, ru-RU)
   └── TextInserter (protocol)
@@ -87,6 +89,33 @@ PermissionsManager   — Microphone, Accessibility, SpeechRecognition
 AppSettings          — UserDefaults-backed: hotkey, mic, locale, auto-insert
 MenuBarView          — SwiftUI menu UI
 ```
+
+### Following the input device
+
+`AVAudioEngine`'s input node binds to the input device it first sees and never rebinds. A
+long-lived engine therefore keeps reporting the old device's format and its tap goes silent
+once the default input changes — connecting AirPods is the usual way — so every later dictation
+captures nothing for the rest of the process. `reset()` does not undo it: per `AVAudioEngine.h`
+it only silences reverb and delay tails, removing no taps and re-reading no hardware formats.
+
+So each dictation builds its own engine and reads the input format from that engine, rather than
+from a cached one. CoreAudio completes a device switch asynchronously, and a format snapshot taken
+before it lands describes the previous device; installing a tap with a mismatched format raises an
+Objective-C exception that Swift cannot catch.
+
+Two things watch for changes, because they cover different moments:
+
+- A CoreAudio listener on `kAudioHardwarePropertyDefaultInputDevice` fires whether or not an
+  engine exists, so it catches the case that actually breaks dictation — the device changing
+  *between* recordings. It re-negotiates the new device's format ahead of the next hotkey press,
+  debounced by 250 ms because one switch arrives as a burst of notifications.
+- `AVAudioEngineConfigurationChange`, scoped to the recording's own engine, catches a switch
+  *during* a recording. Audio captured before the switch is still the user's words, so it is
+  transcribed; only when too little is left does the device change become the reported error,
+  since "No audio was captured" would send the user hunting for a broken microphone instead.
+
+Both are stamped with a generation counter, so a notification arriving after its recording has
+ended cannot be applied to the one that replaced it.
 
 ### Launch at login, and what a launch agent would take
 
