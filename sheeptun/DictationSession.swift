@@ -283,6 +283,8 @@ final class DictationSession: ObservableObject {
             return "Microphone access is denied. Grant it in System Settings → Privacy & Security."
         case AudioRecorderError.noAudioCaptured:
             return "No audio was captured. Hold the hotkey a little longer, or check the input device in System Settings."
+        case AudioRecorderError.inputDeviceChanged:
+            return "The microphone changed while recording — headphones connecting will do it. Press the hotkey again."
         case AudioRecorderError.writeFailed(let reason):
             return "Could not write the recording: \(reason)"
         case TextInsertionError.accessibilityDenied:

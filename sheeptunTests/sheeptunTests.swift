@@ -441,3 +441,61 @@ struct PermissionsManagerTests {
         #expect(!mgr.summary.isEmpty)
     }
 }
+
+// MARK: - Capture generations
+
+/// A device change and the end of a recording race each other: CoreAudio keeps posting for
+/// a switch that is still settling, and AVAudioEngine's configuration-change notification
+/// can land after the engine it described is gone. These cover the stamping that keeps such
+/// a callback from being applied to the recording that replaced it.
+@Suite("CaptureState")
+struct CaptureStateTests {
+    @Test("a callback from a retired generation cannot mark disruption")
+    func lateCallbackIgnored() {
+        let state = CaptureState()
+        let first = state.beginGeneration()
+        state.endGeneration()
+
+        let second = state.beginGeneration()
+        #expect(state.markDisrupted(generation: first) == false)
+        #expect(state.wasDisrupted(generation: second) == false)
+    }
+
+    @Test("a callback from the live generation marks disruption")
+    func liveCallbackApplies() {
+        let state = CaptureState()
+        let generation = state.beginGeneration()
+
+        #expect(state.markDisrupted(generation: generation) == true)
+        #expect(state.wasDisrupted(generation: generation) == true)
+    }
+
+    @Test("a new recording does not inherit the previous disruption")
+    func disruptionDoesNotLeak() {
+        let state = CaptureState()
+        let first = state.beginGeneration()
+        _ = state.markDisrupted(generation: first)
+        state.endGeneration()
+
+        let second = state.beginGeneration()
+        #expect(state.wasDisrupted(generation: second) == false)
+    }
+
+    @Test("isRecording follows the generation lifecycle")
+    func recordingFlagFollowsGeneration() {
+        let state = CaptureState()
+        #expect(state.isRecording == false)
+        _ = state.beginGeneration()
+        #expect(state.isRecording == true)
+        state.endGeneration()
+        #expect(state.isRecording == false)
+    }
+
+    @Test("priming the same device twice does not renegotiate the audio path")
+    func primeDedupes() {
+        let state = CaptureState()
+        #expect(state.prime(device: 42) == true)
+        #expect(state.prime(device: 42) == false)
+        #expect(state.prime(device: 43) == true)
+    }
+}
